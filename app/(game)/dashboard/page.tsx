@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import LoadingScreen from "@/components/ui/LoadingScreen";
-import { expProgressInLevel } from "@/lib/game-logic/expCalculator";
+import { expProgressInLevel, expToLevel } from "@/lib/game-logic/expCalculator";
 import {
   EVOLUTION_STAGES,
   canEvolveToNextStage,
@@ -102,6 +102,12 @@ export default function DashboardPage() {
   const [animationTrigger, setAnimationTrigger] = useState(0);
   const [customToast, setCustomToast] = useState<string | null>(null);
 
+  // ── Tap Buffering Refs ──────────────────────────────────────────────────────
+  const pendingTapsRef = useRef<number>(0);
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const walletAddressRef = useRef<string | null>(null);
+  const prevActiveMonsterIdRef = useRef<string | null>(null);
+
   // Evolve state
   const [evolveModal, setEvolveModal] = useState(false);
   const [evolving, setEvolving] = useState(false);
@@ -159,6 +165,7 @@ export default function DashboardPage() {
       router.replace("/login");
       return;
     }
+    walletAddressRef.current = wallet;
 
     async function fetchMonsters() {
       try {
@@ -221,14 +228,18 @@ export default function DashboardPage() {
   }, [data, activeIndex]);
 
   // ── Tap Interaction ─────────────────────────────────────────────────────────
-  const handleTap = useCallback(async () => {
-    if (!activeMonster || tapping) return;
-    if (activeMonster.energy <= 0) {
-      showToast("⚡ Energy exhausted. Cannot interact right now.");
-      return;
+  const flushPendingTaps = useCallback(async (monsterIdToSync: string) => {
+    if (pendingTapsRef.current === 0) return;
+    
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+      debounceTimeoutRef.current = null;
     }
 
-    const wallet = localStorage.getItem("siggy_wallet_address");
+    const tapsToSend = pendingTapsRef.current;
+    pendingTapsRef.current = 0;
+    
+    const wallet = walletAddressRef.current;
     if (!wallet) return;
 
     setTapping(true);
@@ -237,28 +248,45 @@ export default function DashboardPage() {
       const res = await fetch("/api/monster/tap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletAddress: wallet, monsterId: activeMonster.id }),
+        body: JSON.stringify({
+          walletAddress: wallet,
+          monsterId: monsterIdToSync,
+          count: tapsToSend
+        }),
       });
       const json = await res.json();
       if (!res.ok) {
-        showToast(json.error ?? "Channeling failed.");
+        showToast(json.error ?? "Failed to sync taps with the Realms.");
+        // If error (like energy exhausted), fetch fresh data to sync up
+        const refreshUrl = `/api/monster/list?wallet=${encodeURIComponent(wallet)}&t=${Date.now()}`;
+        const refreshRes = await fetch(refreshUrl);
+        if (refreshRes.ok) {
+          const refreshed = await refreshRes.json();
+          setData(refreshed);
+        }
         return;
       }
 
+      // Reconcile client state with server response
       setData((prev) => {
         if (!prev) return prev;
         return {
           ...prev,
-          monsters: prev.monsters.map((m) =>
-            m.id === activeMonster.id
-              ? {
-                  ...m,
-                  energy: json.monster.energy,
-                  exp:    json.monster.exp,
-                  level:  json.monster.level,
-                }
-              : m
-          ),
+          monsters: prev.monsters.map((m) => {
+            if (m.id !== monsterIdToSync) return m;
+
+            // Apply any additional taps that happened while the request was in-flight
+            const currentPending = pendingTapsRef.current;
+            const updatedExp = json.monster.exp + (currentPending * 10);
+            const updatedLevel = expToLevel(updatedExp);
+
+            return {
+              ...m,
+              energy: Math.max(0, json.monster.energy - currentPending),
+              exp: updatedExp,
+              level: updatedLevel,
+            };
+          }),
         };
       });
 
@@ -270,7 +298,66 @@ export default function DashboardPage() {
     } finally {
       setTapping(false);
     }
-  }, [activeMonster, tapping, showToast]);
+  }, [showToast]);
+
+  const handleTap = useCallback(async () => {
+    if (!activeMonster) return;
+
+    // Check if monster still has energy (taking into account local pending taps)
+    const currentOptimisticEnergy = activeMonster.energy;
+    if (currentOptimisticEnergy <= 0) {
+      showToast("⚡ Energy exhausted. Cannot interact right now.");
+      return;
+    }
+
+    // 1. Optimistically update local UI state immediately (snappy!)
+    pendingTapsRef.current += 1;
+    
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        monsters: prev.monsters.map((m) => {
+          if (m.id !== activeMonster.id) return m;
+          const nextExp = m.exp + 10;
+          const nextLevel = expToLevel(nextExp);
+          return {
+            ...m,
+            energy: Math.max(0, m.energy - 1),
+            exp: nextExp,
+            level: nextLevel,
+          };
+        }),
+      };
+    });
+
+    // 2. Debounce/schedule the sync API call
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+    }
+
+    const currentMonsterId = activeMonster.id;
+    debounceTimeoutRef.current = setTimeout(() => {
+      flushPendingTaps(currentMonsterId);
+    }, 600); // 600ms debounce window
+  }, [activeMonster, showToast, flushPendingTaps]);
+
+  // ── Effect: Flush taps when active monster changes ──────────────────────────
+  useEffect(() => {
+    if (prevActiveMonsterIdRef.current && prevActiveMonsterIdRef.current !== activeMonster?.id) {
+      flushPendingTaps(prevActiveMonsterIdRef.current);
+    }
+    prevActiveMonsterIdRef.current = activeMonster?.id ?? null;
+  }, [activeMonster?.id, flushPendingTaps]);
+
+  // ── Effect: Flush taps when unmounting page ─────────────────────────────────
+  useEffect(() => {
+    return () => {
+      if (prevActiveMonsterIdRef.current) {
+        flushPendingTaps(prevActiveMonsterIdRef.current);
+      }
+    };
+  }, [flushPendingTaps]);
 
   // ── Effect: Auto-clear Evolve Message ─────────────────────────────────────
   useEffect(() => {

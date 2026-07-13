@@ -6,7 +6,7 @@ const EXP_PER_TAP = 10;
 
 export async function POST(req: NextRequest) {
   try {
-    const { walletAddress, monsterId } = await req.json();
+    const { walletAddress, monsterId, count = 1 } = await req.json();
 
     if (!walletAddress || !monsterId) {
       return NextResponse.json(
@@ -14,6 +14,8 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    const tapCount = Math.max(1, parseInt(count) || 1);
 
     const supabase = createServiceClient();
 
@@ -54,9 +56,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Cap tapCount ke sisa energy monster
+    const actualTaps = Math.min(tapCount, monster.energy);
+
+    if (actualTaps < 1) {
+      return NextResponse.json(
+        { error: "Your Siggy is exhausted. Wait for its energy to regenerate." },
+        { status: 400 }
+      );
+    }
+
     // 3. Hitung nilai baru
-    const newEnergy = monster.energy - 1;
-    const newExp    = monster.exp + EXP_PER_TAP;
+    const newEnergy = monster.energy - actualTaps;
+    const newExp    = monster.exp + (actualTaps * EXP_PER_TAP);
 
     // Level dihitung dari formula terpusat — evolution_stage TIDAK diubah di sini.
     // Evolusi tetap manual (player klik Evolve + bayar SIG) sesuai GDD Week 4.
@@ -81,6 +93,7 @@ export async function POST(req: NextRequest) {
     // 4.5. Increment daily quest tap count atomically on database
     const { error: questError } = await supabase.rpc("increment_daily_tap", {
       p_user_id: monster.owner_id,
+      p_count: actualTaps,
     });
     if (questError) {
       console.error("Failed to increment daily tap quest count:", questError);
