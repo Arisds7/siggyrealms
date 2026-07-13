@@ -1,0 +1,19 @@
+name: Energy Regeneration Cron
+
+on:
+  schedule:
+    # Berjalan setiap 5 menit (interval minimal di GitHub Actions schedule)
+    - cron: "*/5 * * * *"
+  # Memungkinkan trigger manual lewat interface GitHub Actions
+  workflow_dispatch:
+
+jobs:
+  regen-energy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Energy Regeneration API
+        run: |
+          curl -X POST "${{ secrets.PRODUCTION_APP_URL }}/api/cron/energy-regen" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            --fail

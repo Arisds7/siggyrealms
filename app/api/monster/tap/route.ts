@@ -1,0 +1,107 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createServiceClient } from "@/lib/supabase/server";
+import { expToLevel } from "@/lib/game-logic/expCalculator";
+
+const EXP_PER_TAP = 10;
+
+export async function POST(req: NextRequest) {
+  try {
+    const { walletAddress, monsterId } = await req.json();
+
+    if (!walletAddress || !monsterId) {
+      return NextResponse.json(
+        { error: "walletAddress and monsterId are required to channel the ritual." },
+        { status: 400 }
+      );
+    }
+
+    const supabase = createServiceClient();
+
+    // 1. Ambil user berdasarkan walletAddress
+    const { data: user, error: userErr } = await supabase
+      .from("users")
+      .select("id")
+      .ilike("wallet_address", walletAddress)
+      .maybeSingle();
+
+    if (userErr || !user) {
+      return NextResponse.json(
+        { error: "Wallet not found in the Codex. Please bind your wallet first." },
+        { status: 404 }
+      );
+    }
+
+    // 2. Ambil state monster saat ini dan pastikan kepemilikannya
+    const { data: monster, error: fetchError } = await supabase
+      .from("monsters")
+      .select("id, energy, exp, level, evolution_stage, owner_id")
+      .eq("id", monsterId)
+      .eq("owner_id", user.id)
+      .single();
+
+    if (fetchError || !monster) {
+      return NextResponse.json(
+        { error: "Entity not found or does not belong to your Vault." },
+        { status: 404 }
+      );
+    }
+
+    // 2. Validasi energy
+    if (monster.energy < 1) {
+      return NextResponse.json(
+        { error: "Your Siggy is exhausted. Wait for its energy to regenerate." },
+        { status: 400 }
+      );
+    }
+
+    // 3. Hitung nilai baru
+    const newEnergy = monster.energy - 1;
+    const newExp    = monster.exp + EXP_PER_TAP;
+
+    // Level dihitung dari formula terpusat — evolution_stage TIDAK diubah di sini.
+    // Evolusi tetap manual (player klik Evolve + bayar SIG) sesuai GDD Week 4.
+    const newLevel  = expToLevel(newExp);
+
+    // 4. Update database
+    const { data: updated, error: updateError } = await supabase
+      .from("monsters")
+      .update({
+        energy: newEnergy,
+        exp:    newExp,
+        level:  newLevel,
+      })
+      .eq("id", monsterId)
+      .select("id, energy, exp, level, evolution_stage")
+      .single();
+
+    if (updateError || !updated) {
+      throw new Error(updateError?.message ?? "Failed to update entity state.");
+    }
+
+    // 4.5. Increment daily quest tap count atomically on database
+    const { error: questError } = await supabase.rpc("increment_daily_tap", {
+      p_user_id: monster.owner_id,
+    });
+    if (questError) {
+      console.error("Failed to increment daily tap quest count:", questError);
+    }
+
+    return NextResponse.json({
+      success:  true,
+      levelUp:  newLevel > monster.level,
+      monster: {
+        id:              updated.id,
+        energy:          updated.energy,
+        exp:             updated.exp,
+        level:           updated.level,
+        evolution_stage: updated.evolution_stage,
+      },
+    });
+  } catch (err: any) {
+    console.error("Tap API error:", err);
+    return NextResponse.json(
+      { error: err.message ?? "An internal tremor struck during the ritual." },
+      { status: 500 }
+    );
+  }
+}
