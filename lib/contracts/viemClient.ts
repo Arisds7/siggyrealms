@@ -21,15 +21,22 @@ export const publicClient = createPublicClient({
 });
 
 // ─── Wallet client ─────────────────────────────────────────────────────────────
-// Buat kirim transaksi (mint, dll). Butuh provider dari wallet extension user
-// (window.ethereum). Dipanggil dari Client Component saat user klik tombol aksi.
-export function getWalletClient() {
-  if (typeof window === "undefined" || !(window as any).ethereum) {
+// Buat kirim transaksi (mint, dll). Butuh provider dari wallet extension user.
+// Dipanggil dari Client Component saat user klik tombol aksi.
+// Menerima custom provider untuk EIP-6963 multi-wallet support.
+export function getWalletClient(provider?: any) {
+  if (typeof window === "undefined") {
     throw new Error("Wallet extension tidak terdeteksi di browser ini.");
   }
+
+  const targetProvider = provider || (window as any).ethereum;
+  if (!targetProvider) {
+    throw new Error("Wallet extension tidak terdeteksi di browser ini.");
+  }
+
   return createWalletClient({
     chain: ritualTestnet,
-    transport: custom((window as any).ethereum),
+    transport: custom(targetProvider),
   });
 }
 
@@ -56,10 +63,11 @@ export function getGenesisEggReadContract() {
  * Kembalikan contract instance GenesisEgg yang terhubung ke walletClient
  * (write). Gunakan untuk kirim transaksi: mint(), approve(), dst.
  *
- * Hanya bisa dipanggil dari Client Component di browser (butuh window.ethereum).
+ * Hanya bisa dipanggil dari Client Component di browser (butuh provider).
+ * Menerima custom provider untuk EIP-6963 multi-wallet support.
  */
-export function getGenesisEggWriteContract() {
-  const walletClient = getWalletClient();
+export function getGenesisEggWriteContract(provider?: any) {
+  const walletClient = getWalletClient(provider);
   return getContract({
     address: GENESIS_EGG_ADDRESS,
     abi: GenesisEggABI,

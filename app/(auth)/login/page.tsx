@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { getWalletClient } from "@/lib/contracts/viemClient";
 import { useBackgroundMusic } from "@/lib/hooks/useBackgroundMusic";
+import { useEIP6963, EIP6963ProviderDetail } from "@/lib/hooks/useEIP6963";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,6 +13,11 @@ export default function LoginPage() {
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<any>(null);
+  const [showWalletSelector, setShowWalletSelector] = useState(false);
+  const [existingUserHandle, setExistingUserHandle] = useState<string | null>(null);
+
+  const { providers, discoveryComplete, getProvider } = useEIP6963();
 
   // Initialize background music
   const { isMuted, toggleMute } = useBackgroundMusic({
@@ -22,16 +28,72 @@ export default function LoginPage() {
 
   async function handleConnectWallet() {
     setError(null);
+    setShowWalletSelector(false);
+    
+    // Check if we have EIP-6963 providers
+    if (providers.length > 1) {
+      setShowWalletSelector(true);
+      return;
+    }
+
+    // Single provider or fallback
+    const provider = providers.length === 1 ? providers[0].provider : (window as any).ethereum;
+    if (!provider) {
+      setError("Wallet extension tidak terdeteksi di browser ini.");
+      return;
+    }
+
     try {
-      const client = getWalletClient();
+      const client = getWalletClient(provider);
       const [address] = await client.requestAddresses();
       setWalletAddress(address);
+      setSelectedProvider(provider);
+      
+      // Check if wallet already registered
+      await checkExistingUser(address);
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
           : "Failed to bind wallet. Ensure your extension is active."
       );
+    }
+  }
+
+  async function handleSelectWallet(providerDetail: EIP6963ProviderDetail) {
+    setError(null);
+    setShowWalletSelector(false);
+    
+    try {
+      const client = getWalletClient(providerDetail.provider);
+      const [address] = await client.requestAddresses();
+      setWalletAddress(address);
+      setSelectedProvider(providerDetail.provider);
+      
+      // Check if wallet already registered
+      await checkExistingUser(address);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to bind wallet. Ensure your extension is active."
+      );
+    }
+  }
+
+  async function checkExistingUser(address: string) {
+    try {
+      const res = await fetch(`/api/auth/check?wallet=${encodeURIComponent(address)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.exists && data.twitter_handle) {
+          setExistingUserHandle(data.twitter_handle);
+          setTwitterHandle(data.twitter_handle);
+        }
+      }
+    } catch (err) {
+      // Silently fail - user can still proceed
+      console.error("Failed to check existing user:", err);
     }
   }
 
@@ -56,6 +118,8 @@ export default function LoginPage() {
         throw new Error(body.error ?? "Ritual failed. Could not register.");
       }
 
+      const data = await res.json();
+      
       // TODO SECURITY: Storing wallet address in localStorage is intentionally
       // simplified for testnet MVP. Upgrade to signature-based auth (SIWE-style)
       // before mainnet — a signed challenge from the server should verify wallet
@@ -140,9 +204,20 @@ export default function LoginPage() {
               value={twitterHandle}
               onChange={(e) => setTwitterHandle(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-              className="w-full rounded-xl border border-white/10 bg-white/5 pl-8 pr-4 py-3 text-white placeholder:text-white/25 focus:outline-none focus:border-violet-500/60 focus:bg-white/8 transition-all"
+              disabled={!!existingUserHandle}
+              className={[
+                "w-full rounded-xl border bg-white/5 pl-8 pr-4 py-3 text-white placeholder:text-white/25 focus:outline-none transition-all",
+                existingUserHandle
+                  ? "border-white/10 bg-white/5 cursor-not-allowed opacity-60"
+                  : "border-white/10 focus:border-violet-500/60 focus:bg-white/8"
+              ].join(" ")}
             />
           </div>
+          {existingUserHandle && (
+            <p className="text-emerald-400 text-xs mt-1.5">
+              ✓ Wallet ini sudah terdaftar sebagai @{existingUserHandle}
+            </p>
+          )}
         </div>
 
         {/* Connect Wallet button */}
@@ -165,6 +240,43 @@ export default function LoginPage() {
             "🔗 Bind Your Wallet"
           )}
         </button>
+
+        {/* Wallet Selector Modal */}
+        {showWalletSelector && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="bg-[#1a1625] border border-white/10 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl">
+              <h3 className="text-white font-semibold text-lg mb-4 text-center">
+                Select Your Wallet
+              </h3>
+              <div className="space-y-2">
+                {providers.map((provider) => (
+                  <button
+                    key={provider.info.uuid}
+                    onClick={() => handleSelectWallet(provider)}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all active:scale-[0.98]"
+                  >
+                    {provider.info.icon && (
+                      <img
+                        src={provider.info.icon}
+                        alt={provider.info.name}
+                        className="w-8 h-8 rounded"
+                      />
+                    )}
+                    <span className="text-white font-medium text-sm">
+                      {provider.info.name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setShowWalletSelector(false)}
+                className="w-full mt-4 py-2 text-white/50 text-sm hover:text-white/80 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Submit button */}
         <button

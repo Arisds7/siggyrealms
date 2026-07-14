@@ -8,6 +8,7 @@ import {
   ritualTestnet,
 } from "@/lib/contracts/viemClient";
 import GenesisEggABI from "@/lib/contracts/abi/GenesisEgg.json";
+import { useEIP6963, EIP6963ProviderDetail } from "@/lib/hooks/useEIP6963";
 
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -33,6 +34,10 @@ export default function MintPage() {
   const [walletAddress, setWalletAddress] = useState<`0x${string}` | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [totalSupply, setTotalSupply] = useState<string | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<any>(null);
+  const [showWalletSelector, setShowWalletSelector] = useState(false);
+
+  const { providers, discoveryComplete, getProvider } = useEIP6963();
 
   // ── Connect wallet & read on-chain state ──────────────────────────────────
   const connectAndCheck = useCallback(async () => {
@@ -40,9 +45,81 @@ export default function MintPage() {
     setErrorMessage(null);
 
     try {
-      const wc = getWalletClient();
+      // Check if we have EIP-6963 providers
+      if (providers.length > 1) {
+        setShowWalletSelector(true);
+        setStatus("idle");
+        return;
+      }
+
+      // Single provider or fallback
+      const provider = providers.length === 1 ? providers[0].provider : (window as any).ethereum;
+      if (!provider) {
+        setErrorMessage("Wallet extension tidak terdeteksi di browser ini.");
+        setStatus("error");
+        return;
+      }
+
+      const wc = getWalletClient(provider);
       const [address] = await wc.requestAddresses();
       setWalletAddress(address);
+      setSelectedProvider(provider);
+
+      // Check registration & monster ownership status in database
+      const checkRes = await fetch(`/api/auth/check?wallet=${address}`);
+      const checkData = await checkRes.json();
+
+      if (!checkData.userId) {
+        setErrorMessage("You must bind your X/Twitter account to the Realms first.");
+        setTimeout(() => router.push("/login"), 2000);
+        setStatus("error");
+        return;
+      }
+
+      if (checkData.hasMonster) {
+        router.push("/dashboard");
+        return;
+      }
+
+      // Read hasMinted and totalSupply in parallel
+      const [minted, supply] = await Promise.all([
+        publicClient.readContract({
+          address: GENESIS_EGG_ADDRESS,
+          abi: GenesisEggABI,
+          functionName: "hasMinted",
+          args: [address],
+        }),
+        publicClient.readContract({
+          address: GENESIS_EGG_ADDRESS,
+          abi: GenesisEggABI,
+          functionName: "totalSupply",
+        }),
+      ]);
+
+      setTotalSupply(supply?.toString() ?? "0");
+
+      if (minted) {
+        setStatus("already_minted");
+        return;
+      }
+
+      setStatus("idle");
+    } catch (err: any) {
+      setErrorMessage(err?.message ?? "Failed to bind your wallet to the Realms.");
+      setStatus("error");
+    }
+  }, [router, providers]);
+
+  const handleSelectWallet = useCallback(async (providerDetail: EIP6963ProviderDetail) => {
+    setStatus("checking");
+    setErrorMessage(null);
+    setShowWalletSelector(false);
+
+    try {
+      const wc = getWalletClient(providerDetail.provider);
+      const [address] = await wc.requestAddresses();
+      setWalletAddress(address);
+      setSelectedProvider(providerDetail.provider);
 
       // Check registration & monster ownership status in database
       const checkRes = await fetch(`/api/auth/check?wallet=${address}`);
@@ -128,7 +205,7 @@ export default function MintPage() {
     }
 
     try {
-      const wc = getWalletClient();
+      const wc = getWalletClient(selectedProvider);
 
       // Step 1.2: Check if user is registered in the database and has no monster
       setStatus("checking");
@@ -437,6 +514,43 @@ export default function MintPage() {
             </div>
           )}
         </div>
+
+        {/* Wallet Selector Modal */}
+        {showWalletSelector && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="bg-[#1a1625] border border-white/10 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl">
+              <h3 className="text-white font-semibold text-lg mb-4 text-center">
+                Select Your Wallet
+              </h3>
+              <div className="space-y-2">
+                {providers.map((provider) => (
+                  <button
+                    key={provider.info.uuid}
+                    onClick={() => handleSelectWallet(provider)}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition-all active:scale-[0.98]"
+                  >
+                    {provider.info.icon && (
+                      <img
+                        src={provider.info.icon}
+                        alt={provider.info.name}
+                        className="w-8 h-8 rounded"
+                      />
+                    )}
+                    <span className="text-white font-medium text-sm">
+                      {provider.info.name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setShowWalletSelector(false)}
+                className="w-full mt-4 py-2 text-white/50 text-sm hover:text-white/80 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Footer info */}
         <div className="mt-6 text-center space-y-1">

@@ -12,15 +12,31 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createServiceClient();
+  const normalizedWallet = walletAddress.toLowerCase();
 
-  // upsert: kalau wallet_address sudah ada, jangan bikin user baru
-  // (biar user lama tetap bisa "login" ulang tanpa data ke-reset).
+  // Cek apakah wallet sudah terdaftar
+  const { data: existingUser, error: fetchError } = await supabase
+    .from("users")
+    .select("id, twitter_handle")
+    .ilike("wallet_address", normalizedWallet)
+    .maybeSingle();
+
+  if (fetchError) {
+    return NextResponse.json({ error: fetchError.message }, { status: 500 });
+  }
+
+  // Kalau wallet sudah ada, jangan update twitter_handle
+  if (existingUser) {
+    return NextResponse.json({ user: existingUser });
+  }
+
+  // Wallet baru: insert dengan twitter_handle yang dikirim
   const { data, error } = await supabase
     .from("users")
-    .upsert(
-      { wallet_address: walletAddress.toLowerCase(), twitter_handle: twitterHandle },
-      { onConflict: "wallet_address", ignoreDuplicates: false }
-    )
+    .insert({
+      wallet_address: normalizedWallet,
+      twitter_handle: twitterHandle,
+    })
     .select()
     .single();
 

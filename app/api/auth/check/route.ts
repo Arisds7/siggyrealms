@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   // Jika user tidak ditemukan, berarti belum terdaftar
   if (!user) {
-    return NextResponse.json({ hasMonster: false, userId: null });
+    return NextResponse.json({ exists: false, hasMonster: false, userId: null });
   }
 
   // 2. Cek apakah user memiliki monster di tabel monsters
@@ -39,8 +39,9 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({
+    exists: true,
     hasMonster: !!monster,
     userId: user.id,
-    user: user,
+    twitter_handle: user.twitter_handle,
   });
 }
