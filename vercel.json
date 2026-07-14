@@ -1,0 +1,10 @@
+{
+  "buildCommandOverrides": {
+    "functions": {
+      "app/api/**/*.{ts,js}": {
+        "runtime": "nodejs20.x"
+      }
+    }
+  },
+  "regions": ["hkg1"]
+}

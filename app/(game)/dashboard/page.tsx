@@ -339,7 +339,7 @@ export default function DashboardPage() {
     const currentMonsterId = activeMonster.id;
     debounceTimeoutRef.current = setTimeout(() => {
       flushPendingTaps(currentMonsterId);
-    }, 600); // 600ms debounce window
+    }, 300); // 300ms debounce window for snappier feel
   }, [activeMonster, showToast, flushPendingTaps]);
 
   // ── Effect: Flush taps when active monster changes ──────────────────────────
