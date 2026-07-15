@@ -117,10 +117,10 @@ export default function DashboardPage() {
   const [videoFinished, setVideoFinished] = useState(false);
   const [evolveResult, setEvolveResult] = useState<any>(null);
   // Video UX state
-  const [videoBuffering, setVideoBuffering] = useState(false); // true = belum siap diputar
-  const [showSkip, setShowSkip] = useState(false);             // tombol skip muncul setelah 1.5 detik
+  const [videoBuffering, setVideoBuffering] = useState(false); // true = not yet ready to manifest
+  const [showSkip, setShowSkip] = useState(false);             // skip sigil appears after 1.5 seconds
   const videoTimeoutRef = useRef<NodeJS.Timeout | null>(null); // safety fallback timeout
-  const skipTimerRef    = useRef<NodeJS.Timeout | null>(null); // timer munculnya tombol skip
+  const skipTimerRef    = useRef<NodeJS.Timeout | null>(null); // timer for skip sigil appearance
 
   // Feed state
   const [feedModal, setFeedModal] = useState(false);
@@ -373,10 +373,10 @@ export default function DashboardPage() {
     return () => clearTimeout(timer);
   }, [evolveTransition]);
 
-  // ── Effect: Preload ascension video ke browser cache saat dashboard mount ──
-  // Menggunakan <link rel="preload"> programatik agar video sudah di-buffer
-  // sebelum user klik Evolve, sehingga tidak ada blank black screen saat loading.
-  // Pendekatan ini lebih ringan daripada hidden <video> element di DOM.
+  // ── Effect: Preload ascension video to browser cache on dashboard mount ──
+  // Using programmatic <link rel="preload"> to buffer video
+  // before user clicks Ascend, preventing void screen during manifestation.
+  // This approach is lighter than hidden <video> element in the DOM.
   useEffect(() => {
     const link = document.createElement("link");
     link.rel   = "preload";
@@ -388,12 +388,12 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // ── Effect: Kelola timer video saat showEvolveVideo berubah ──────────────
-  // - Saat video muncul: mulai safety timeout (8 detik) dan timer skip (1.5 detik)
-  // - Saat video selesai/disembunyikan: bersihkan semua timer
+  // ── Effect: Manage video timers when showEvolveVideo changes ──────────────
+  // - When vision manifests: start safety timeout (8 seconds) and skip timer (1.5 seconds)
+  // - When vision completes/hidden: clean all timers
   useEffect(() => {
     if (!showEvolveVideo) {
-      // Bersihkan timer saat video disembunyikan
+      // Clean timers when vision is hidden
       if (videoTimeoutRef.current) clearTimeout(videoTimeoutRef.current);
       if (skipTimerRef.current)    clearTimeout(skipTimerRef.current);
       setVideoBuffering(false);
@@ -401,19 +401,19 @@ export default function DashboardPage() {
       return;
     }
 
-    // Saat video baru muncul: tampilkan indikator buffering
+    // When vision first manifests: display buffering indicator
     setVideoBuffering(true);
     setShowSkip(false);
 
-    // Safety timeout: kalau video belum selesai dalam 8 detik (gagal load,
-    // network error, format tidak didukung), paksa lanjut — toh data evolusi
-    // sudah tersimpan di DB, yang penting UI tidak stuck selamanya.
+    // Safety timeout: if vision not complete within 8 seconds (failed load,
+    // network error, format not supported), force continuation — ascension data
+    // ALREADY stored in Codex, Interface must continue, not stuck forever.
     videoTimeoutRef.current = setTimeout(() => {
       setVideoFinished(true);
     }, 8000);
 
-    // Tombol skip: muncul setelah 1.5 detik agar user punya pilihan
-    // kalau sudah sering evolve dan tidak mau nonton video penuh
+    // Skip sigil: appears after 1.5 seconds for summoner choice
+    // if frequently ascending and prefer not to witness full vision.
     skipTimerRef.current = setTimeout(() => {
       setShowSkip(true);
     }, 1500);
@@ -424,9 +424,9 @@ export default function DashboardPage() {
     };
   }, [showEvolveVideo]);
 
-  // ── Handler: Video selesai, error, atau user klik Skip ───────────────────
-  // Satu handler tunggal untuk ketiga skenario ini supaya tidak ada kode
-  // duplikat dan timer selalu dibersihkan dengan benar.
+  // ── Handler: Vision complete, error, or summoner clicks Skip ───────────────────
+  // Single handler for all three scenarios to prevent duplicate code
+  // and ensure timers are always cleansed properly.
   const handleVideoEnd = useCallback(() => {
     if (videoTimeoutRef.current) clearTimeout(videoTimeoutRef.current);
     if (skipTimerRef.current)    clearTimeout(skipTimerRef.current);
@@ -735,7 +735,7 @@ export default function DashboardPage() {
       {showEvolveVideo && (
         <div className="fixed inset-0 z-50 bg-black flex items-center justify-center animate-fade-in">
 
-          {/* Indikator buffering — tampil selama video belum siap diputar */}
+          {/* Buffering indicator — manifests while vision not ready to play */}
           {videoBuffering && (
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10">
               <p className="text-white/45 text-[11px] font-mono tracking-[0.35em] uppercase animate-pulse">
@@ -744,11 +744,11 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Video — preload="auto" agar browser lanjutkan buffering yang dimulai
-              saat dashboard pertama kali dibuka (via <link rel="preload"> di useEffect).
-              onError = treat error sama seperti video selesai normal, karena data
-              evolusi SUDAH tersimpan di DB sebelum video muncul — UI harus tetap lanjut.
-              onCanPlay = sembunyikan indikator buffering saat video siap. */}
+          {/* Video — preload="auto" so browser continues buffering started
+              during first dashboard load (via <link rel="preload"> in useEffect).
+              onError = treat disruption same as normal vision completion, since
+              ascension data ALREADY stored in Codex before vision manifests —
+              onCanPlay = hide buffering indicator when vision is ready. */}
           <video
             src="/video/ascension.mp4"
             autoPlay
@@ -760,8 +760,8 @@ export default function DashboardPage() {
             onError={handleVideoEnd}
           />
 
-          {/* Tombol Skip — muncul setelah 1.5 detik, pojok kanan bawah.
-              Berguna untuk user yang sudah familiar dengan animasi ini. */}
+          {/* Skip sigil — appears after 1.5 seconds, bottom right corner.
+              Useful for summoners familiar with this manifestation. */}
           {showSkip && (
             <button
               onClick={handleVideoEnd}
@@ -890,7 +890,7 @@ export default function DashboardPage() {
                               {foodDef.name}
                             </p>
                             <p className="text-[10px] text-violet-300 font-semibold">
-                              {effectDesc} (Permanen)
+                              {effectDesc} (Bound Forever)
                             </p>
                           </div>
                         </div>

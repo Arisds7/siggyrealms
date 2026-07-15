@@ -1,6 +1,6 @@
 -- =========================================================
 -- Migration 0005: regen_all_monster_attributes()
--- Jalankan di Supabase SQL Editor atau via: supabase db push
+-- Run in Supabase SQL Editor or via: supabase db push
 -- =========================================================
 
 create or replace function regen_all_monster_attributes(
@@ -19,7 +19,7 @@ declare
   v_energy_updated int := 0;
   v_satiety_updated int := 0;
 begin
-  -- 1. Update energy secara bulk
+  -- 1. Update energy in bulk
   with energy_to_update as (
     select
       id,
@@ -48,7 +48,7 @@ begin
 
   get diagnostics v_energy_updated = row_count;
 
-  -- 2. Update satiety secara bulk
+  -- 2. Update satiety in bulk
   with satiety_to_update as (
     select
       id,

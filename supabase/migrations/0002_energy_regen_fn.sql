@@ -1,22 +1,22 @@
 -- =========================================================
 -- Migration: Energy Regeneration RPC Function
--- Jalankan di Supabase SQL Editor atau via: supabase db push
+-- Run in Supabase SQL Editor or via: supabase db push
 -- =========================================================
 
--- Fungsi ini dipanggil oleh endpoint /api/cron/energy-regen
--- setiap 5 menit via GitHub Actions.
+-- This function is called by endpoint /api/cron/energy-regen
+-- every 5 minutes via GitHub Actions.
 --
--- Logika:
---   1. Hitung berapa banyak "tick" (interval p_interval_minutes) yang
---      sudah berlalu sejak energy_last_regen_at.
---   2. Tambahkan (ticks * p_regen_per_tick) energy, di-cap di p_max_energy.
---   3. Maju-kan energy_last_regen_at sebesar (ticks * interval), bukan
---      set ke NOW() — supaya sisa menit yang belum genap 1 tick tidak
---      hilang dan ikut terhitung di cycle berikutnya.
---   4. Hanya update monster yang energy-nya < p_max_energy DAN
---      sudah lewat minimal 1 tick (efisiensi: skip monster yang belum
---      perlu update sama sekali).
---   5. Return jumlah baris yang diupdate (untuk logging di API route).
+-- Logic:
+--   1. Calculate how many "ticks" (interval p_interval_minutes) have
+--      elapsed since energy_last_regen_at.
+--   2. Add (ticks * p_regen_per_tick) energy, capped at p_max_energy.
+--   3. Advance energy_last_regen_at by (ticks * interval), not
+--      set to NOW() — so remaining minutes not yet 1 full tick
+--      are not lost and counted in the next cycle.
+--   4. Only update entities with energy < p_max_energy AND
+--      elapsed at least 1 tick (efficiency: skip entities that don't
+--      need update at all).
+--   5. Return number of rows updated (for logging in API route).
 
 create or replace function regen_all_monster_energy(
   p_max_energy       int     default 300,
@@ -25,7 +25,7 @@ create or replace function regen_all_monster_energy(
 )
 returns int
 language plpgsql
-security definer   -- dijalankan dengan hak pemilik fungsi, bypass RLS
+security definer   -- executed with function owner privileges, bypass RLS
 as $$
 declare
   v_updated int;
@@ -35,7 +35,7 @@ begin
       id,
       energy,
       energy_last_regen_at,
-      -- berapa tick penuh yang sudah berlalu
+      -- how many full ticks have elapsed
       floor(
         extract(epoch from (now() - energy_last_regen_at)) / 60.0
         / p_interval_minutes
@@ -54,8 +54,8 @@ begin
       p_max_energy,
       m.energy + (u.ticks_elapsed * p_regen_per_tick)
     ),
-    -- Maju-kan timestamp sebesar tick yang sudah diproses,
-    -- bukan set ke now() — supaya sisa menit tidak hilang.
+    -- Advance timestamp by ticks processed,
+    -- not set to now() — so remaining minutes are not lost.
     energy_last_regen_at = m.energy_last_regen_at
       + (u.ticks_elapsed * p_interval_minutes * interval '1 minute')
   from monsters_to_update u

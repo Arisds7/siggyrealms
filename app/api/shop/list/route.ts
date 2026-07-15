@@ -19,7 +19,7 @@ export async function GET() {
     .order("price_sig", { ascending: true });
 
   if (error || !dbFoods) {
-    return NextResponse.json({ error: "Gagal memuat daftar persediaan Realm." }, { status: 500 });
+    return NextResponse.json({ error: "Failed to reveal the Realm's provisions." }, { status: 500 });
   }
 
   // Merge DB prices with local effect/name metadata

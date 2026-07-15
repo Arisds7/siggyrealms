@@ -1,10 +1,10 @@
 -- =========================================================
 -- Migration 0009: Revoke RPC public access
--- Jalankan di Supabase SQL Editor atau via: supabase db push
+-- Run in Supabase SQL Editor or via: supabase db push
 -- =========================================================
 
--- 1. Cabut hak akses eksekusi dari PUBLIC, anon, dan authenticated untuk semua RPC sensitif
--- 2. Berikan hak akses eksekusi hanya ke service_role (digunakan backend Next.js)
+-- 1. Revoke execute access from PUBLIC, anon, and authenticated for all sensitive RPCs
+-- 2. Grant execute access only to service_role (used by Next.js backend)
 
 -- evolve_monster
 revoke execute on function evolve_monster(uuid, uuid, text, bigint, bigint, numeric) from public, anon, authenticated;

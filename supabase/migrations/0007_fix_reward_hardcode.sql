@@ -1,13 +1,13 @@
 -- =========================================================
 -- Migration 0007: fix_reward_hardcode
--- Jalankan di Supabase SQL Editor atau via: supabase db push
+-- Run in Supabase SQL Editor or via: supabase db push
 -- =========================================================
 
--- 1. Hapus fungsi lama terlebih dahulu untuk menghindari overload signature di Postgres
+-- 1. Drop old functions first to avoid Postgres overload signature
 drop function if exists claim_daily_quest(uuid, text, bigint);
 drop function if exists claim_limited_task(uuid, text, bigint);
 
--- 2. Re-create claim_daily_quest tanpa parameter reward_sig (hardcoded di DB)
+-- 2. Re-create claim_daily_quest without reward_sig parameter (hardcoded in DB)
 create or replace function claim_daily_quest(
   p_user_id uuid,
   p_quest_type text -- 'login', 'tap', 'feed'
@@ -22,7 +22,7 @@ declare
   v_progress int;
   v_reward_sig bigint;
 begin
-  -- Tentukan jumlah reward SIG harian berdasarkan jenis quest
+  -- Determine daily quest SIG reward amount based on quest type
   v_reward_sig := case p_quest_type
     when 'login' then 50
     when 'tap' then 100
@@ -31,15 +31,15 @@ begin
   end;
 
   if v_reward_sig is null then
-    raise exception 'Tipe quest tidak valid: %', p_quest_type;
+    raise exception 'Invalid quest type: %', p_quest_type;
   end if;
 
-  -- 1. Ambil status klaim dan progress saat ini
+  -- 1. Fetch current claim status and progress
   if p_quest_type = 'login' then
     select login_claimed into v_claimed
     from daily_quests
     where owner_id = p_user_id and quest_date = v_quest_date;
-    v_progress := 1; -- Login selalu dianggap 1 jika baris harian terinisialisasi
+    v_progress := 1; -- Login always considered 1 if daily row initialized
   elsif p_quest_type = 'tap' then
     select tap_claimed, tap_count into v_claimed, v_progress
     from daily_quests
@@ -50,25 +50,25 @@ begin
     where owner_id = p_user_id and quest_date = v_quest_date;
   end if;
 
-  -- 2. Validasi
+  -- 2. Validate
   if v_claimed is null then
-    raise exception 'Quest harian belum terinisialisasi untuk hari ini.';
+    raise exception 'Daily quest not initialized for today.';
   end if;
 
   if v_claimed = true then
-    raise exception 'Quest ini sudah diklaim hari ini.';
+    raise exception 'This quest has already been claimed today.';
   end if;
 
-  -- Cek kecukupan target progress (login: 1, tap: 100, feed: 1)
+  -- Check target progress sufficiency (login: 1, tap: 100, feed: 1)
   if p_quest_type = 'login' and v_progress < 1 then
-    raise exception 'Quest login belum selesai.';
+    raise exception 'Login quest not completed.';
   elsif p_quest_type = 'tap' and v_progress < 100 then
-    raise exception 'Quest tap belum selesai (butuh 100 tap, progres saat ini: %).', v_progress;
+    raise exception 'Tap quest not completed (requires 100 taps, current progress: %).', v_progress;
   elsif p_quest_type = 'feed' and v_progress < 1 then
-    raise exception 'Quest feed belum selesai.';
+    raise exception 'Feed quest not completed.';
   end if;
 
-  -- 3. Update status claimed
+  -- 3. Update claimed status
   if p_quest_type = 'login' then
     update daily_quests set login_claimed = true where owner_id = p_user_id and quest_date = v_quest_date;
   elsif p_quest_type = 'tap' then
@@ -77,14 +77,14 @@ begin
     update daily_quests set feed_claimed = true where owner_id = p_user_id and quest_date = v_quest_date;
   end if;
 
-  -- 4. Tambah SIG balance user
+  -- 4. Add SIG to summoner balance
   update users
   set sig_balance = sig_balance + v_reward_sig
   where id = p_user_id;
 end;
 $$;
 
--- 3. Re-create claim_limited_task tanpa parameter reward_sig (hardcoded di DB)
+-- 3. Re-create claim_limited_task without reward_sig parameter (hardcoded in DB)
 create or replace function claim_limited_task(
   p_user_id uuid,
   p_task_type text -- 'follow', 'like', 'retweet'
@@ -96,7 +96,7 @@ as $$
 declare
   v_reward_sig bigint;
 begin
-  -- Tentukan jumlah reward SIG limited/one-time berdasarkan jenis task
+  -- Determine limited/one-time task SIG reward amount based on task type
   v_reward_sig := case p_task_type
     when 'follow' then 1000
     when 'like' then 1000
@@ -105,19 +105,19 @@ begin
   end;
 
   if v_reward_sig is null then
-    raise exception 'Tipe task tidak valid: %', p_task_type;
+    raise exception 'Invalid task type: %', p_task_type;
   end if;
 
-  -- 1. Insert ke limited_tasks. Otomatis gagal jika sudah ada (unique constraint)
+  -- 1. Insert into limited_tasks. Automatically fails if already exists (unique constraint)
   insert into limited_tasks (user_id, task_type)
   values (p_user_id, p_task_type);
 
-  -- 2. Tambah SIG balance user
+  -- 2. Add SIG to summoner balance
   update users
   set sig_balance = sig_balance + v_reward_sig
   where id = p_user_id;
 exception
   when unique_violation then
-    raise exception 'Task "%" sudah diklaim sebelumnya.', p_task_type;
+    raise exception 'Task "%" has already been claimed before.', p_task_type;
 end;
 $$;

@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
 
     const supabase = createServiceClient();
 
-    // 1. Cari user di database
+    // 1. Seek summoner in the Codex
     const { data: user, error: userError } = await supabase
       .from("users")
       .select("id, sig_balance")
@@ -31,10 +31,10 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 2. Lazy Reset / Just-in-Time initialization quest harian hari ini (UTC date)
+    // 2. Lazy Reset / Just-in-Time initialization of today's daily quests (UTC date)
     const todayStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD format UTC
 
-    // Upsert row kosong dengan ignoreDuplicates: true agar progress tap/feed tidak ter-reset
+    // Upsert empty row with ignoreDuplicates: true so tap/feed progress is not reset
     const { error: initError } = await supabase
       .from("daily_quests")
       .upsert(
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
       console.error("Failed to initialize daily quest row:", initError);
     }
 
-    // 3. Ambil progress quest harian hari ini
+    // 3. Fetch today's daily quest progress
     const { data: dailyQuest, error: questError } = await supabase
       .from("daily_quests")
       .select("login_claimed, tap_count, tap_claimed, feed_claimed, fed_count")
@@ -55,10 +55,10 @@ export async function GET(req: NextRequest) {
       .single();
 
     if (questError || !dailyQuest) {
-      throw new Error(questError?.message ?? "Gagal mengambil data quest harian.");
+      throw new Error(questError?.message ?? "Failed to retrieve daily quest records from the Codex.");
     }
 
-    // 4. Ambil limited tasks (one-time) yang sudah pernah diklaim user
+    // 4. Fetch limited tasks (one-time) already claimed by summoner
     const { data: limitedTasks, error: limitedError } = await supabase
       .from("limited_tasks")
       .select("task_type")
@@ -102,7 +102,7 @@ export async function GET(req: NextRequest) {
   } catch (err: any) {
     console.error("[api/quest/list] Error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Terjadi kesalahan internal." },
+      { error: err.message ?? "An internal tremor disrupted the transmission." },
       { status: 500 }
     );
   }

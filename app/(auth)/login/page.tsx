@@ -39,7 +39,7 @@ export default function LoginPage() {
     // Single provider or fallback
     const provider = providers.length === 1 ? providers[0].provider : (window as any).ethereum;
     if (!provider) {
-      setError("Wallet extension tidak terdeteksi di browser ini.");
+      setError("No wallet conduit detected in this realm.");
       return;
     }
 
@@ -140,7 +140,7 @@ export default function LoginPage() {
         router.push("/mint");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Terjadi kesalahan.");
+      setError(err instanceof Error ? err.message : "A disturbance disrupted the ritual.");
     } finally {
       setLoading(false);
     }
@@ -215,7 +215,7 @@ export default function LoginPage() {
           </div>
           {existingUserHandle && (
             <p className="text-emerald-400 text-xs mt-1.5">
-              ✓ Wallet ini sudah terdaftar sebagai @{existingUserHandle}
+              ✓ This conduit is already bound to @{existingUserHandle}
             </p>
           )}
         </div>

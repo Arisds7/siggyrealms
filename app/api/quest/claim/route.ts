@@ -10,21 +10,21 @@ export async function POST(req: NextRequest) {
 
     if (!walletAddress || !type || !questKey) {
       return NextResponse.json(
-        { error: "walletAddress, type, dan questKey wajib diisi." },
+        { error: "walletAddress, type, and questKey are required for the ritual." },
         { status: 400 }
       );
     }
 
     if (type !== "daily" && type !== "limited") {
       return NextResponse.json(
-        { error: "Type harus berupa 'daily' atau 'limited'." },
+        { error: "Type must be 'daily' or 'limited'." },
         { status: 400 }
       );
     }
 
     const supabase = createServiceClient();
 
-    // 1. Cari user di database
+    // 1. Seek summoner in the Codex
     const { data: user, error: userError } = await supabase
       .from("users")
       .select("id, sig_balance")
@@ -33,15 +33,15 @@ export async function POST(req: NextRequest) {
 
     if (userError || !user) {
       return NextResponse.json(
-        { error: "Wallet tidak terdaftar di Codex." },
+        { error: "Wallet not found in the Codex." },
         { status: 404 }
       );
     }
 
-    // 2. Eksekusi klaim secara atomic via RPC (reward di-hardcode di level DB)
+    // 2. Execute claim atomically via RPC (reward is hardcoded at DB level)
     if (type === "daily") {
       if (!ALLOWED_DAILY.includes(questKey)) {
-        return NextResponse.json({ error: "Quest harian tidak valid." }, { status: 400 });
+        return NextResponse.json({ error: "Daily quest not valid." }, { status: 400 });
       }
 
       const { error: rpcError } = await supabase.rpc("claim_daily_quest", {
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
       }
     } else {
       if (!ALLOWED_LIMITED.includes(questKey)) {
-        return NextResponse.json({ error: "Task limited tidak valid." }, { status: 400 });
+        return NextResponse.json({ error: "Limited task not valid." }, { status: 400 });
       }
 
       const { error: rpcError } = await supabase.rpc("claim_limited_task", {
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Ambil balance SIG terbaru untuk di-sync ke frontend
+    // 3. Fetch latest SIG balance to sync to frontend
     const { data: updatedUser } = await supabase
       .from("users")
       .select("sig_balance")
@@ -77,12 +77,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       sig_balance: updatedUser?.sig_balance ?? user.sig_balance,
-      message: `Berhasil mengklaim reward untuk ${questKey}!`,
+      message: `Reward for ${questKey} has been channelled to your Vault!`,
     });
   } catch (err: any) {
     console.error("[api/quest/claim] Error:", err);
     return NextResponse.json(
-      { error: err.message ?? "Terjadi kesalahan internal." },
+      { error: err.message ?? "An internal tremor disrupted the ritual." },
       { status: 500 }
     );
   }

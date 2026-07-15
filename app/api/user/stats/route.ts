@@ -6,19 +6,19 @@ import { createServiceClient } from "@/lib/supabase/server";
 /**
  * GET /api/user/stats
  *
- * Auth pattern: wallet address diambil dari query param `wallet`,
- * identik dengan semua endpoint lain di codebase ini (/api/arena/info,
- * /api/quest/list, /api/monster/list). Wallet berasal dari localStorage
- * yang di-set saat login — ini adalah auth model testnet yang sudah
- * disepakati di seluruh codebase.
+ * Auth pattern: wallet address taken from query param `wallet`,
+ * identical to all other endpoints in this codebase (/api/arena/info,
+ * /api/quest/list, /api/monster/list). Wallet comes from localStorage
+ * set during login — this is the agreed testnet auth model
+ * across the entire codebase.
  *
- * Yang TIDAK dilakukan di sini:
- * - Tidak menerima user_id sebagai param (user bisa spoof ID orang lain)
- * - Tidak return data user lain (query di-ilike oleh wallet, 1 row only)
- * - Tidak menerima sig_balance override dari client
+ * What is NOT done here:
+ * - Does not accept user_id as param (user could spoof another's ID)
+ * - Does not return other users' data (query is ilike by wallet, 1 row only)
+ * - Does not accept sig_balance override from client
  *
- * Lazy ticket reset: sama persis dengan logika di /api/arena/info —
- * reset dilakukan just-in-time jika reset_at < today UTC.
+ * Lazy ticket reset: identical to logic in /api/arena/info —
+ * reset performed just-in-time if reset_at < today UTC.
  */
 export async function GET(req: NextRequest) {
   try {
@@ -34,8 +34,8 @@ export async function GET(req: NextRequest) {
 
     const supabase = createServiceClient();
 
-    // Ambil user berdasarkan wallet address (case-insensitive)
-    // ilike memastikan "0xABC" == "0xabc" — konsisten dengan semua endpoint lain
+    // Fetch user by wallet address (case-insensitive)
+    // ilike ensures "0xABC" == "0xabc" — consistent with all other endpoints
     const { data: user, error: userErr } = await supabase
       .from("users")
       .select("id, sig_balance, arena_tickets_remaining, arena_tickets_reset_at")
@@ -49,16 +49,16 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // ── Lazy ticket reset (just-in-time, bukan cron) ──────────────────────────
-    // Desain: tiket direset setiap hari UTC midnight secara lazy,
-    // yaitu dicek per-request bukan via scheduled job.
+    // ── Lazy ticket reset (just-in-time, not cron) ──────────────────────────
+    // Design: tickets reset daily at UTC midnight lazily,
+    // i.e. checked per-request not via scheduled job.
     let tickets = user.arena_tickets_remaining;
     const resetDate = new Date(user.arena_tickets_reset_at).toISOString().split("T")[0];
     const today    = new Date().toISOString().split("T")[0];
 
     if (resetDate < today) {
       tickets = 3;
-      // Best-effort update — RPC battle juga akan reset saat battle berikutnya
+      // Best-effort update — RPC battle will also reset during next battle
       await supabase
         .from("users")
         .update({
@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
         status: 200,
         headers: {
           "Content-Type":  "application/json",
-          // Wajib no-store agar browser tidak cache nilai lama
+          // Must be no-store to prevent browser from caching old values
           "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
           "Pragma":        "no-cache",
           "Expires":       "0",

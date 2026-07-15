@@ -66,7 +66,7 @@ export default function QuestPage() {
       setDailyQuests(data.daily_quests);
       setLimitedTasks(data.limited_tasks);
 
-      // Ambil twitter handle dari endpoint monster/list
+      // Fetch twitter handle from monster/list endpoint
       const userRes = await fetch(
         `/api/monster/list?wallet=${encodeURIComponent(wallet)}&t=${Date.now()}`,
         { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } }
@@ -127,7 +127,7 @@ export default function QuestPage() {
       await refreshStats();
       showToast(data.message ?? "Reward channelled to your Vault!");
       
-      // Refresh status data quest dari server
+      // Refresh quest status data from server
       await fetchQuests(wallet);
     } catch (err) {
       showToast("The Vault channel collapsed. Check your connection.");
@@ -171,7 +171,7 @@ export default function QuestPage() {
 
   const textShadowStyle = { textShadow: "0 1px 4px rgba(0,0,0,0.8)" };
 
-  // Konfigurasi link Twitter Limited Tasks
+  // Twitter Limited Tasks link configuration
   const TWITTER_LINKS = {
     follow: "https://twitter.com/intent/follow?screen_name=@universenga",
     like: "https://twitter.com/intent/like?tweet_id=2061357778787307895",

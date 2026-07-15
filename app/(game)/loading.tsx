@@ -2,9 +2,7 @@
 
 import LoadingScreen from "@/components/ui/LoadingScreen";
 
-// Konvensi Next.js App Router: file ini otomatis ditampilkan saat
-// halaman-halaman dalam grup (game) sedang di-render server-side.
-// Karena tidak ada data progress asli di sini, pakai mode indeterminate.
+// Next.js App Router convention: this file is automatically displayed when pages in the (game) group are being server-side rendered. Since there is no actual progress data here, use indeterminate mode.
 export default function GameLoading() {
   return <LoadingScreen />;
 }

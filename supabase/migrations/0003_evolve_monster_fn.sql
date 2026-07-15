@@ -1,25 +1,25 @@
 -- =========================================================
 -- Migration 0003: evolve_monster() — atomic evolution RPC
--- Jalankan di Supabase SQL Editor atau via: supabase db push
+-- Run in Supabase SQL Editor or via: supabase db push
 -- =========================================================
 --
--- Fungsi ini dipanggil oleh POST /api/monster/evolve dan
--- melakukan TIGA update dalam satu transaksi implisit PL/pgSQL:
+-- This function is called by POST /api/monster/evolve and
+-- performs THREE updates in one implicit PL/pgSQL transaction:
 --
---   a. Kurangi sig_balance owner sebesar p_cost_sig,
---      TAMBAH p_reward_sig (net change = reward - cost).
---      Net selalu positif sesuai GDD.
+--   a. Deduct owner sig_balance by p_cost_sig,
+--      ADD p_reward_sig (net change = reward - cost).
+--      Net is always positive per GDD.
 --
---   b. Kalikan semua kolom di monster_stats dengan p_stat_multiplier (1.5).
---      Kolom monster_food_bonus TIDAK disentuh sama sekali —
---      sesuai GDD: "Food bonus tidak ikut dikalikan."
---      Nilai dibulatkan ke integer (ROUND) kecuali crit & dodge (numeric).
+--   b. Multiply all columns in monster_stats by p_stat_multiplier (1.5).
+--      monster_food_bonus columns are NOT touched at all —
+--      per GDD: "Food bonus tidak ikut dikalikan."
+--      Values rounded to integer (ROUND) except crit & dodge (numeric).
 --
 --   c. Set monsters.evolution_stage = p_next_stage.
 --
--- Karena semua statement ada dalam satu blok PL/pgSQL, kalau salah
--- satu RAISE EXCEPTION maka seluruh operasi di-rollback otomatis
--- oleh Postgres — tidak akan terjadi state setengah-setengah.
+-- Since all statements are in one PL/pgSQL block, if any
+-- one RAISE EXCEPTION then the entire operation is auto-rollbacked
+-- by Postgres — no half-state will occur.
 
 create or replace function evolve_monster(
   p_monster_id      uuid,
@@ -40,7 +40,7 @@ begin
   where id = p_owner_id;
 
   if not found then
-    raise exception 'User tidak ditemukan: %', p_owner_id;
+    raise exception 'User not found: %', p_owner_id;
   end if;
 
   -- b. Scale base stats — food_bonus columns intentionally excluded
@@ -56,7 +56,7 @@ begin
   where monster_id = p_monster_id;
 
   if not found then
-    raise exception 'monster_stats tidak ditemukan untuk monster: %', p_monster_id;
+    raise exception 'monster_stats not found for entity: %', p_monster_id;
   end if;
 
   -- c. Update evolution stage on the monster row
@@ -65,7 +65,7 @@ begin
   where id = p_monster_id;
 
   if not found then
-    raise exception 'Monster tidak ditemukan: %', p_monster_id;
+    raise exception 'Entity not found: %', p_monster_id;
   end if;
 end;
 $$;

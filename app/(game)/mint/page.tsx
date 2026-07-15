@@ -55,7 +55,7 @@ export default function MintPage() {
       // Single provider or fallback
       const provider = providers.length === 1 ? providers[0].provider : (window as any).ethereum;
       if (!provider) {
-        setErrorMessage("Wallet extension tidak terdeteksi di browser ini.");
+        setErrorMessage("No wallet conduit detected in this realm.");
         setStatus("error");
         return;
       }
@@ -250,6 +250,7 @@ export default function MintPage() {
         functionName: "mint",
         account: walletAddress,
         chain: ritualTestnet,
+        gas: 300000n, // Set explicit gas limit to avoid exceeding block gas limit
       });
 
       setTxHash(hash);
