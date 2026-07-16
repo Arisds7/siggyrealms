@@ -77,7 +77,7 @@ export default function ShopPage() {
 
         // Fetch user data for profile info only (sig_balance comes from global context)
         const userRes = await fetch(
-          `/api/monster/list?wallet=${encodeURIComponent(wallet!)}&t=${Date.now()}`,
+          `/api/monster/list?t=${Date.now()}`,
           { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } }
         );
         if (userRes.ok) {
@@ -108,7 +108,6 @@ export default function ShopPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          walletAddress: wallet,
           foodKey: itemKey,
           quantity: qty,
         }),

@@ -296,7 +296,6 @@ export default function MintPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          walletAddress,
           txHash: hash,
         }),
       });

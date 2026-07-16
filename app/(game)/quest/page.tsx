@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
@@ -56,7 +56,7 @@ export default function QuestPage() {
   const fetchQuests = useCallback(async (wallet: string) => {
     try {
       const res = await fetch(
-        `/api/quest/list?wallet=${encodeURIComponent(wallet)}&t=${Date.now()}`,
+        `/api/quest/list?t=${Date.now()}`,
         { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } }
       );
       if (!res.ok) {
@@ -68,7 +68,7 @@ export default function QuestPage() {
 
       // Fetch twitter handle from monster/list endpoint
       const userRes = await fetch(
-        `/api/monster/list?wallet=${encodeURIComponent(wallet)}&t=${Date.now()}`,
+        `/api/monster/list?t=${Date.now()}`,
         { headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" } }
       );
       if (userRes.ok) {
@@ -112,7 +112,6 @@ export default function QuestPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          walletAddress: wallet,
           type,
           questKey,
         }),

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -118,7 +118,7 @@ export default function ArenaPage() {
   // ── Fetch Arena Data (initial load — manages loading/error state) ──────────
   const loadArenaData = useCallback(async (wallet: string) => {
     try {
-      const res = await fetch(`/api/arena/info?wallet=${encodeURIComponent(wallet)}&t=${Date.now()}`);
+      const res = await fetch(`/api/arena/info?t=${Date.now()}`);
       if (!res.ok) throw new Error("The Arena portal failed to open. The Realms are unstable.");
       const data = await res.json();
       setMonsters(data.monsters ?? []);
@@ -135,7 +135,7 @@ export default function ArenaPage() {
     const wallet = walletRef.current;
     if (!wallet) return;
     try {
-      const res = await fetch(`/api/arena/info?wallet=${encodeURIComponent(wallet)}&t=${Date.now()}`);
+      const res = await fetch(`/api/arena/info?t=${Date.now()}`);
       if (!res.ok) return; // silently ignore errors during refresh
       const data = await res.json();
       setMonsters(data.monsters ?? []);
@@ -181,7 +181,7 @@ export default function ArenaPage() {
       const res = await fetch("/api/arena/battle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletAddress: wallet, monsterId: monster.id }),
+        body: JSON.stringify({ monsterId: monster.id }),
       });
       const data = await res.json();
 

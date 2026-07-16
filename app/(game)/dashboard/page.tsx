@@ -169,7 +169,7 @@ export default function DashboardPage() {
 
     async function fetchMonsters() {
       try {
-        const url = `/api/monster/list?wallet=${encodeURIComponent(wallet!)}&t=${Date.now()}`;
+        const url = `/api/monster/list?t=${Date.now()}`;
         const res = await fetch(url, {
           headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" }
         });
@@ -249,7 +249,6 @@ export default function DashboardPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          walletAddress: wallet,
           monsterId: monsterIdToSync,
           count: tapsToSend
         }),
@@ -258,7 +257,7 @@ export default function DashboardPage() {
       if (!res.ok) {
         showToast(json.error ?? "Failed to sync taps with the Realms.");
         // If error (like energy exhausted), fetch fresh data to sync up
-        const refreshUrl = `/api/monster/list?wallet=${encodeURIComponent(wallet)}&t=${Date.now()}`;
+        const refreshUrl = `/api/monster/list?t=${Date.now()}`;
         const refreshRes = await fetch(refreshUrl);
         if (refreshRes.ok) {
           const refreshed = await refreshRes.json();
@@ -358,6 +357,70 @@ export default function DashboardPage() {
       }
     };
   }, [flushPendingTaps]);
+
+  // ── Effect: Smart Polling to sync database status real-time (Free Tier Safe) ──
+  useEffect(() => {
+    const wallet = localStorage.getItem("siggy_wallet_address");
+    if (!wallet) return;
+
+    let intervalId: NodeJS.Timeout | null = null;
+
+    const startPolling = () => {
+      if (intervalId) return;
+      intervalId = setInterval(async () => {
+        // Safety check: Don't poll or overwrite if user is actively interacting
+        if (pendingTapsRef.current > 0 || tapping || feeding || evolving) {
+          return;
+        }
+
+        try {
+          const url = `/api/monster/list?t=${Date.now()}`;
+          const res = await fetch(url, {
+            headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" }
+          });
+          if (res.ok) {
+            const parsed = await res.json();
+            
+            // Re-verify that user did not start tapping during the network request
+            if (pendingTapsRef.current === 0 && !tapping && !feeding && !evolving) {
+              setData(parsed);
+              refreshStats();
+            }
+          }
+        } catch (err) {
+          console.error("Failed to background sync entity states:", err);
+        }
+      }, 15000); // 15 seconds interval: safe and light on free tiers
+    };
+
+    const stopPolling = () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    // Only run polling if tab is active/visible (Smart Polling)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    };
+
+    // Initial check and event binding
+    if (document.visibilityState === "visible") {
+      startPolling();
+    }
+    
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [tapping, feeding, evolving, refreshStats]);
 
   // ── Effect: Auto-clear Evolve Message ─────────────────────────────────────
   useEffect(() => {
@@ -510,7 +573,7 @@ export default function DashboardPage() {
       const res = await fetch("/api/monster/evolve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletAddress: wallet, monsterId: activeMonster.id }),
+        body: JSON.stringify({ monsterId: activeMonster.id }),
       });
       const json = await res.json();
 
@@ -544,7 +607,6 @@ export default function DashboardPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          walletAddress: wallet,
           monsterId: activeMonster.id,
           foodKey,
         }),
