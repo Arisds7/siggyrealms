@@ -1,84 +1,61 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { getWalletClient } from "@/lib/contracts/viemClient";
 import { useBackgroundMusic } from "@/lib/hooks/useBackgroundMusic";
 import { useEIP6963, EIP6963ProviderDetail } from "@/lib/hooks/useEIP6963";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type AuthStep =
+  | "idle"           // Nothing connected yet
+  | "wallet_bound"   // Wallet connected, nonce fetched — waiting for signature
+  | "verified"       // Signature verified, session cookie set — ready to submit
+  | "submitting";    // Registering & redirecting
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export default function LoginPage() {
   const router = useRouter();
+
+  // Form state
   const [twitterHandle, setTwitterHandle] = useState("");
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<any>(null);
-  const [showWalletSelector, setShowWalletSelector] = useState(false);
   const [existingUserHandle, setExistingUserHandle] = useState<string | null>(null);
 
-  const { providers, discoveryComplete, getProvider } = useEIP6963();
+  // Auth flow state
+  const [authStep, setAuthStep] = useState<AuthStep>("idle");
+  const [nonce, setNonce] = useState<string | null>(null);
+  const [signing, setSigning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Initialize background music
+  // UI state
+  const [showWalletSelector, setShowWalletSelector] = useState(false);
+
+  const { providers } = useEIP6963();
+
+  // Background music
   const { isMuted, toggleMute } = useBackgroundMusic({
     src: "/audio/login-theme.mp3",
     volume: 0.3,
     loop: true,
   });
 
-  async function handleConnectWallet() {
-    setError(null);
-    setShowWalletSelector(false);
-    
-    // Check if we have EIP-6963 providers
-    if (providers.length > 1) {
-      setShowWalletSelector(true);
-      return;
-    }
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
-    // Single provider or fallback
-    const provider = providers.length === 1 ? providers[0].provider : (window as any).ethereum;
-    if (!provider) {
-      setError("No wallet conduit detected in this realm.");
-      return;
+  async function fetchNonce(address: string): Promise<string> {
+    const res = await fetch(
+      `/api/auth/nonce?walletAddress=${encodeURIComponent(address)}`
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error ?? "Failed to request authentication nonce.");
     }
-
-    try {
-      const client = getWalletClient(provider);
-      const [address] = await client.requestAddresses();
-      setWalletAddress(address);
-      setSelectedProvider(provider);
-      
-      // Check if wallet already registered
-      await checkExistingUser(address);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to bind wallet. Ensure your extension is active."
-      );
-    }
-  }
-
-  async function handleSelectWallet(providerDetail: EIP6963ProviderDetail) {
-    setError(null);
-    setShowWalletSelector(false);
-    
-    try {
-      const client = getWalletClient(providerDetail.provider);
-      const [address] = await client.requestAddresses();
-      setWalletAddress(address);
-      setSelectedProvider(providerDetail.provider);
-      
-      // Check if wallet already registered
-      await checkExistingUser(address);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to bind wallet. Ensure your extension is active."
-      );
-    }
+    const data = await res.json();
+    return data.nonce as string;
   }
 
   async function checkExistingUser(address: string) {
@@ -91,19 +68,126 @@ export default function LoginPage() {
           setTwitterHandle(data.twitter_handle);
         }
       }
-    } catch (err) {
-      // Silently fail - user can still proceed
-      console.error("Failed to check existing user:", err);
+    } catch {
+      // Silently ignore — user can still proceed
     }
   }
+
+  // ── Step 1: Connect Wallet ────────────────────────────────────────────────
+
+  async function handleConnectWallet() {
+    setError(null);
+
+    // Multiple providers → show selector
+    if (providers.length > 1) {
+      setShowWalletSelector(true);
+      return;
+    }
+
+    const provider =
+      providers.length === 1 ? providers[0].provider : (window as any).ethereum;
+    if (!provider) {
+      setError("No wallet conduit detected in this realm.");
+      return;
+    }
+
+    await connectWithProvider(provider);
+  }
+
+  async function handleSelectWallet(providerDetail: EIP6963ProviderDetail) {
+    setError(null);
+    setShowWalletSelector(false);
+    await connectWithProvider(providerDetail.provider);
+  }
+
+  async function connectWithProvider(provider: any) {
+    try {
+      const client = getWalletClient(provider);
+      const [address] = await client.requestAddresses();
+
+      setWalletAddress(address);
+      setSelectedProvider(provider);
+
+      // Fetch SIWE nonce for this wallet
+      const fetchedNonce = await fetchNonce(address);
+      setNonce(fetchedNonce);
+
+      // Pre-fill twitter handle if user was already registered
+      await checkExistingUser(address);
+
+      setAuthStep("wallet_bound");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to bind wallet. Ensure your extension is active."
+      );
+    }
+  }
+
+  // ── Step 2: Sign Message (SIWE) ───────────────────────────────────────────
+
+  async function handleSignMessage() {
+    if (!walletAddress || !nonce || !selectedProvider) {
+      setError("Wallet or nonce missing. Please reconnect your wallet.");
+      return;
+    }
+
+    setSigning(true);
+    setError(null);
+
+    try {
+      const client = getWalletClient(selectedProvider);
+
+      // IMPORTANT: This message MUST match exactly what /api/auth/verify expects.
+      const message = `Sign this message to authenticate with Siggy Realms.\n\nNonce: ${nonce}`;
+
+      const signature = await client.signMessage({
+        account: walletAddress as `0x${string}`,
+        message,
+      });
+
+      // Send signature to backend for verification
+      const verifyRes = await fetch("/api/auth/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress, nonce, signature }),
+      });
+
+      if (!verifyRes.ok) {
+        const body = await verifyRes.json().catch(() => ({}));
+        throw new Error(body.error ?? "Signature verification failed.");
+      }
+
+      // Session cookie is now set by the server.
+      // Also store in localStorage for V1 dashboard backward-compat (Tahap 1 only).
+      localStorage.setItem("siggy_wallet_address", walletAddress);
+
+      setAuthStep("verified");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to sign message. Please try again."
+      );
+    } finally {
+      setSigning(false);
+    }
+  }
+
+  // ── Step 3: Register & Redirect ───────────────────────────────────────────
 
   async function handleSubmit() {
     if (!twitterHandle.trim() || !walletAddress) {
       setError("Provide your X handle and bind your wallet to begin.");
       return;
     }
-    setLoading(true);
+    if (authStep !== "verified") {
+      setError("Please sign the authentication message first.");
+      return;
+    }
+
+    setAuthStep("submitting");
     setError(null);
+
     try {
       const res = await fetch("/api/auth/register", {
         method: "POST",
@@ -113,20 +197,13 @@ export default function LoginPage() {
           walletAddress,
         }),
       });
+
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? "Ritual failed. Could not register.");
       }
 
-      const data = await res.json();
-      
-      // TODO SECURITY: Storing wallet address in localStorage is intentionally
-      // simplified for testnet MVP. Upgrade to signature-based auth (SIWE-style)
-      // before mainnet — a signed challenge from the server should verify wallet
-      // ownership, not just the address string.
-      localStorage.setItem("siggy_wallet_address", walletAddress);
-
-      // Check if user already has a monster to decide where to redirect
+      // Check if user already has a Siggy to decide where to redirect
       const listRes = await fetch(
         `/api/monster/list?wallet=${encodeURIComponent(walletAddress)}`
       );
@@ -136,15 +213,20 @@ export default function LoginPage() {
           Array.isArray(listData.monsters) && listData.monsters.length > 0;
         router.push(hasMonster ? "/dashboard" : "/mint");
       } else {
-        // Default to mint if list check fails
         router.push("/mint");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "A disturbance disrupted the ritual.");
-    } finally {
-      setLoading(false);
+      setError(
+        err instanceof Error ? err.message : "A disturbance disrupted the ritual."
+      );
+      setAuthStep("verified"); // Allow retry
     }
   }
+
+  // ── Derived UI State ──────────────────────────────────────────────────────
+
+  const isSubmitting = authStep === "submitting";
+  const isVerified   = authStep === "verified" || isSubmitting;
 
   return (
     <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#0d0b14]">
@@ -157,7 +239,7 @@ export default function LoginPage() {
         {isMuted ? "🔇" : "🔊"}
       </button>
 
-      {/* ── Hero illustration ─────────────────────────────────────────────── */}
+      {/* ── Hero Illustration ── */}
       <div className="absolute inset-0 z-0">
         <Image
           src="/branding/login_page.png"
@@ -166,7 +248,6 @@ export default function LoginPage() {
           priority
           className="object-cover object-center opacity-60"
         />
-        {/* Gradient overlay so the form is readable */}
         <div
           className="absolute inset-0"
           style={{
@@ -176,8 +257,9 @@ export default function LoginPage() {
         />
       </div>
 
-      {/* ── Form card ─────────────────────────────────────────────────────── */}
+      {/* ── Form Card ── */}
       <div className="relative z-10 w-full max-w-sm px-6 pb-10 flex flex-col items-center gap-5">
+
         {/* Title */}
         <div className="text-center space-y-1 mb-2">
           <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-violet-300 via-purple-200 to-pink-300 bg-clip-text text-transparent drop-shadow">
@@ -188,7 +270,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* X / Twitter handle */}
+        {/* X / Twitter Handle */}
         <div className="w-full">
           <label className="block text-white/60 text-xs mb-1.5 uppercase tracking-wider">
             X / Twitter Handle
@@ -204,12 +286,12 @@ export default function LoginPage() {
               value={twitterHandle}
               onChange={(e) => setTwitterHandle(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-              disabled={!!existingUserHandle}
+              disabled={!!existingUserHandle || isSubmitting}
               className={[
                 "w-full rounded-xl border bg-white/5 pl-8 pr-4 py-3 text-white placeholder:text-white/25 focus:outline-none transition-all",
-                existingUserHandle
-                  ? "border-white/10 bg-white/5 cursor-not-allowed opacity-60"
-                  : "border-white/10 focus:border-violet-500/60 focus:bg-white/8"
+                existingUserHandle || isSubmitting
+                  ? "border-white/10 cursor-not-allowed opacity-60"
+                  : "border-white/10 focus:border-violet-500/60",
               ].join(" ")}
             />
           </div>
@@ -220,10 +302,11 @@ export default function LoginPage() {
           )}
         </div>
 
-        {/* Connect Wallet button */}
+        {/* ── STEP 1: Connect Wallet ── */}
         <button
           id="bind-wallet-button"
           onClick={handleConnectWallet}
+          disabled={authStep !== "idle" || isSubmitting}
           className={[
             "w-full rounded-xl py-3 font-semibold text-sm transition-all duration-200",
             walletAddress
@@ -241,7 +324,26 @@ export default function LoginPage() {
           )}
         </button>
 
-        {/* Wallet Selector Modal */}
+        {/* ── STEP 2: Sign Message (SIWE) ── shown after wallet is bound */}
+        {authStep === "wallet_bound" && (
+          <button
+            id="sign-message-button"
+            onClick={handleSignMessage}
+            disabled={signing}
+            className="w-full rounded-xl py-3 font-semibold text-sm bg-violet-500/20 border border-violet-500/40 text-violet-300 hover:bg-violet-500/30 hover:border-violet-500/60 transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {signing ? "The crystal is resonating…" : "✍️ Sign to Authenticate"}
+          </button>
+        )}
+
+        {/* Signature verified indicator */}
+        {isVerified && (
+          <div className="w-full rounded-xl py-2.5 px-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm text-center">
+            ✓ Identity verified by the Realms
+          </div>
+        )}
+
+        {/* ── Wallet Selector Modal ── */}
         {showWalletSelector && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-[#1a1625] border border-white/10 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl">
@@ -278,14 +380,14 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Submit button */}
+        {/* ── STEP 3: Begin the Ritual (only active after verification) ── */}
         <button
           id="begin-ritual-button"
           onClick={handleSubmit}
-          disabled={loading || !walletAddress || !twitterHandle.trim()}
+          disabled={isSubmitting || !walletAddress || !twitterHandle.trim() || !isVerified}
           className="w-full rounded-xl py-3.5 font-bold text-base bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white shadow-lg shadow-violet-900/40 transition-all duration-200 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:from-violet-600 disabled:hover:to-purple-600"
         >
-          {loading ? "Consulting the Realms…" : "Begin the Ritual"}
+          {isSubmitting ? "Consulting the Realms…" : "Begin the Ritual"}
         </button>
 
         {/* Error */}
