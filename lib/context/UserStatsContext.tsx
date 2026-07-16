@@ -63,12 +63,9 @@ export function UserStatsProvider({ children }: { children: React.ReactNode }) {
   const walletRef = useRef<string | null>(null);
 
   const fetchStats = useCallback(async () => {
-    const wallet = walletRef.current;
-    if (!wallet) return;
-
     try {
       const res = await fetch(
-        `/api/user/stats?wallet=${encodeURIComponent(wallet)}&t=${Date.now()}`,
+        `/api/user/stats?t=${Date.now()}`,
         {
           headers: {
             "Cache-Control": "no-cache, no-store, must-revalidate",

@@ -4,34 +4,25 @@ import { SPECIES, SPECIES_KEYS } from "@/lib/constants/monsterBaseStats";
 import type { Element } from "@/lib/constants/monsterBaseStats";
 import { runBattle } from "@/lib/game-logic/battleFormula";
 import type { CombatantStats } from "@/lib/game-logic/battleFormula";
-import { EVOLUTION_STAT_MULTIPLIER } from "@/lib/constants/evolutionThresholds";
+import { requireAuth } from "@/lib/auth/session";
 
 // ─── Opponent Generation ──────────────────────────────────────────────────────
-// Approach A: Deterministic dummy monster scaled from species base stats.
-// Level = player level ± small variance. Element = purely random.
-// Stats are scaled to mirror natural discrete player evolution stage multiplier plus variance.
-
 function generateOpponent(playerStats: CombatantStats, playerLevel: number): CombatantStats & { level: number } {
-  // Level variance: -3 to +5 from player level, min 15 (since player min is 15)
   const variance = Math.floor(Math.random() * 9) - 3; // -3..+5
   const opponentLevel = Math.max(15, playerLevel + variance);
 
-  // Pick a random species as the base
   const speciesKey = SPECIES_KEYS[Math.floor(Math.random() * SPECIES_KEYS.length)];
   const species = SPECIES[speciesKey];
 
-  // Pick a random element (may or may not match species's natural element)
   const ELEMENTS: Element[] = ["fire", "water", "nature", "lightning", "dark"];
   const element = ELEMENTS[Math.floor(Math.random() * ELEMENTS.length)];
 
-  // Opsi A: Dynamic Scale-to-Player
-  // Opponent stats are generated directly scaling from the player's stats to guarantee balanced combat
-  const hpVariance   = 0.95 + Math.random() * 0.15; // 0.95 s.d 1.10
-  const atkVariance  = 0.90 + Math.random() * 0.15; // 0.90 s.d 1.05
-  const defVariance  = 0.90 + Math.random() * 0.15; // 0.90 s.d 1.05
-  const spdVariance  = 0.90 + Math.random() * 0.20; // 0.90 s.d 1.10
-  const critVariance = 0.90 + Math.random() * 0.20; // 0.90 s.d 1.10
-  const dodgeVariance= 0.90 + Math.random() * 0.20; // 0.90 s.d 1.10
+  const hpVariance   = 0.95 + Math.random() * 0.15;
+  const atkVariance  = 0.90 + Math.random() * 0.15;
+  const defVariance  = 0.90 + Math.random() * 0.15;
+  const spdVariance  = 0.90 + Math.random() * 0.20;
+  const critVariance = 0.90 + Math.random() * 0.20;
+  const dodgeVariance= 0.90 + Math.random() * 0.20;
 
   return {
     name: `Shadow ${species.name}`,
@@ -50,11 +41,22 @@ function generateOpponent(playerStats: CombatantStats, playerLevel: number): Com
 
 export async function POST(req: NextRequest) {
   try {
-    const { walletAddress, monsterId } = await req.json();
-
-    if (!walletAddress || !monsterId) {
+    // ── Auth: read wallet from SIWE session cookie ───────────────────────────
+    let walletAddress: string;
+    try {
+      walletAddress = await requireAuth();
+    } catch {
       return NextResponse.json(
-        { error: "walletAddress and monsterId are required to begin the ritual." },
+        { error: "Unauthorized. Please authenticate before entering the Arena." },
+        { status: 401 }
+      );
+    }
+
+    const { monsterId } = await req.json();
+
+    if (!monsterId) {
+      return NextResponse.json(
+        { error: "monsterId is required to begin the ritual." },
         { status: 400 }
       );
     }

@@ -1,16 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/auth/session";
 
 const ALLOWED_DAILY = ["login", "tap", "feed"];
 const ALLOWED_LIMITED = ["follow", "like", "retweet"];
 
 export async function POST(req: NextRequest) {
   try {
-    const { walletAddress, type, questKey } = await req.json();
-
-    if (!walletAddress || !type || !questKey) {
+    // ── Auth: read wallet from SIWE session cookie ───────────────────────────
+    let walletAddress: string;
+    try {
+      walletAddress = await requireAuth();
+    } catch {
       return NextResponse.json(
-        { error: "walletAddress, type, and questKey are required for the ritual." },
+        { error: "Unauthorized. Please authenticate before claiming quest rewards." },
+        { status: 401 }
+      );
+    }
+
+    const { type, questKey } = await req.json();
+
+    if (!type || !questKey) {
+      return NextResponse.json(
+        { error: "type and questKey are required for the ritual." },
         { status: 400 }
       );
     }

@@ -2,14 +2,26 @@ import { NextResponse } from "next/server";
 import { publicClient, GENESIS_EGG_ADDRESS } from "@/lib/contracts/viemClient";
 import { createServiceClient } from "@/lib/supabase/server";
 import { rollRandomSpecies } from "@/lib/constants/monsterBaseStats";
+import { requireAuth } from "@/lib/auth/session";
 
 export async function POST(req: Request) {
   try {
-    const { walletAddress, txHash } = await req.json();
-
-    if (!walletAddress || !txHash) {
+    // ── Auth: read wallet from SIWE session cookie ───────────────────────────
+    let walletAddress: string;
+    try {
+      walletAddress = await requireAuth();
+    } catch {
       return NextResponse.json(
-        { error: "walletAddress and txHash are required to awaken a Crystal." },
+        { error: "Unauthorized. Please authenticate before awakening a Crystal." },
+        { status: 401 }
+      );
+    }
+
+    const { txHash } = await req.json();
+
+    if (!txHash) {
+      return NextResponse.json(
+        { error: "txHash is required to awaken a Crystal." },
         { status: 400 }
       );
     }
@@ -49,7 +61,7 @@ export async function POST(req: Request) {
 
     if (!tokenId) {
       return NextResponse.json(
-        { error: "Crystal Token ID not found in the transaction log." },
+        { error: "Crystal Token ID not found in the transaction log for your wallet address." },
         { status: 400 }
       );
     }

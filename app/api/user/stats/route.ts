@@ -2,44 +2,33 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/auth/session";
 
 /**
  * GET /api/user/stats
  *
- * Auth pattern: wallet address taken from query param `wallet`,
- * identical to all other endpoints in this codebase (/api/arena/info,
- * /api/quest/list, /api/monster/list). Wallet comes from localStorage
- * set during login — this is the agreed testnet auth model
- * across the entire codebase.
- *
- * What is NOT done here:
- * - Does not accept user_id as param (user could spoof another's ID)
- * - Does not return other users' data (query is ilike by wallet, 1 row only)
- * - Does not accept sig_balance override from client
- *
- * Lazy ticket reset: identical to logic in /api/arena/info —
- * reset performed just-in-time if reset_at < today UTC.
+ * Auth pattern: wallet address taken from verified SIWE session cookie.
  */
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const wallet = searchParams.get("wallet");
-
-    if (!wallet) {
+    // ── Auth: read wallet from SIWE session cookie ───────────────────────────
+    let walletAddress: string;
+    try {
+      walletAddress = await requireAuth();
+    } catch {
       return NextResponse.json(
-        { error: "wallet parameter is required." },
-        { status: 400 }
+        { error: "Unauthorized. Please authenticate first." },
+        { status: 401 }
       );
     }
 
     const supabase = createServiceClient();
 
-    // Fetch user by wallet address (case-insensitive)
-    // ilike ensures "0xABC" == "0xabc" — consistent with all other endpoints
+    // Fetch user by wallet address from session (case-insensitive)
     const { data: user, error: userErr } = await supabase
       .from("users")
       .select("id, sig_balance, arena_tickets_remaining, arena_tickets_reset_at")
-      .ilike("wallet_address", wallet)
+      .ilike("wallet_address", walletAddress)
       .maybeSingle();
 
     if (userErr || !user) {
@@ -50,15 +39,12 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Lazy ticket reset (just-in-time, not cron) ──────────────────────────
-    // Design: tickets reset daily at UTC midnight lazily,
-    // i.e. checked per-request not via scheduled job.
     let tickets = user.arena_tickets_remaining;
     const resetDate = new Date(user.arena_tickets_reset_at).toISOString().split("T")[0];
     const today    = new Date().toISOString().split("T")[0];
 
     if (resetDate < today) {
       tickets = 3;
-      // Best-effort update — RPC battle will also reset during next battle
       await supabase
         .from("users")
         .update({
@@ -78,7 +64,6 @@ export async function GET(req: NextRequest) {
         status: 200,
         headers: {
           "Content-Type":  "application/json",
-          // Must be no-store to prevent browser from caching old values
           "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
           "Pragma":        "no-cache",
           "Expires":       "0",

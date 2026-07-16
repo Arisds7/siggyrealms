@@ -2,14 +2,19 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/auth/session";
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const wallet = searchParams.get("wallet");
-
-    if (!wallet) {
-      return NextResponse.json({ error: "wallet parameter is required." }, { status: 400 });
+    // ── Auth: read wallet from SIWE session cookie ───────────────────────────
+    let walletAddress: string;
+    try {
+      walletAddress = await requireAuth();
+    } catch {
+      return NextResponse.json(
+        { error: "Unauthorized. Please authenticate first." },
+        { status: 401 }
+      );
     }
 
     const supabase = createServiceClient();
@@ -18,7 +23,7 @@ export async function GET(req: NextRequest) {
     const { data: user, error: userErr } = await supabase
       .from("users")
       .select("id, sig_balance, arena_tickets_remaining, arena_tickets_reset_at")
-      .ilike("wallet_address", wallet)
+      .ilike("wallet_address", walletAddress)
       .maybeSingle();
 
     if (userErr || !user) {

@@ -1,26 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/auth/session";
 
 /**
  * POST /api/shop/buy
- * Body: { walletAddress: string, foodKey: string, quantity: number }
+ * Body: { foodKey: string, quantity: number }
  *
  * Validates SIG balance, deducts cost, and updates inventory atomically
  * via Postgres RPC `buy_item` (with row-level FOR UPDATE locking).
  */
 export async function POST(req: NextRequest) {
   try {
+    // ── Auth: read wallet from SIWE session cookie ───────────────────────────
+    let walletAddress: string;
+    try {
+      walletAddress = await requireAuth();
+    } catch {
+      return NextResponse.json(
+        { error: "Unauthorized. Please authenticate before making purchases." },
+        { status: 401 }
+      );
+    }
+
     const body = await req.json();
-    const { walletAddress, foodKey, quantity } = body as {
-      walletAddress?: string;
+    const { foodKey, quantity } = body as {
       foodKey?: string;
       quantity?: number;
     };
 
     // ── Input validation ────────────────────────────────────────────────────
-    if (!walletAddress || !foodKey || !quantity) {
+    if (!foodKey || !quantity) {
       return NextResponse.json(
-        { error: "walletAddress, foodKey, and quantity are required." },
+        { error: "foodKey and quantity are required." },
         { status: 400 }
       );
     }

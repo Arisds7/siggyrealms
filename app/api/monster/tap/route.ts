@@ -1,16 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/auth/session";
 import { expToLevel } from "@/lib/game-logic/expCalculator";
 
 const EXP_PER_TAP = 10;
 
 export async function POST(req: NextRequest) {
   try {
-    const { walletAddress, monsterId, count = 1 } = await req.json();
-
-    if (!walletAddress || !monsterId) {
+    // ── Auth: read wallet from SIWE session cookie ───────────────────────────
+    let walletAddress: string;
+    try {
+      walletAddress = await requireAuth();
+    } catch {
       return NextResponse.json(
-        { error: "walletAddress and monsterId are required to channel the ritual." },
+        { error: "Unauthorized. Please authenticate before channelling the ritual." },
+        { status: 401 }
+      );
+    }
+
+    const { monsterId, count = 1 } = await req.json();
+
+    if (!monsterId) {
+      return NextResponse.json(
+        { error: "monsterId is required to channel the ritual." },
         { status: 400 }
       );
     }
@@ -19,7 +31,7 @@ export async function POST(req: NextRequest) {
 
     const supabase = createServiceClient();
 
-    // 1. Ambil user berdasarkan walletAddress
+    // 1. Ambil user berdasarkan walletAddress dari session
     const { data: user, error: userErr } = await supabase
       .from("users")
       .select("id")
@@ -48,7 +60,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Validasi energy
+    // 3. Validasi energy
     if (monster.energy < 1) {
       return NextResponse.json(
         { error: "Your Siggy is exhausted. Wait for its energy to regenerate." },
@@ -66,15 +78,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Hitung nilai baru
+    // 4. Hitung nilai baru
     const newEnergy = monster.energy - actualTaps;
     const newExp    = monster.exp + (actualTaps * EXP_PER_TAP);
 
     // Level dihitung dari formula terpusat — evolution_stage TIDAK diubah di sini.
-    // Evolusi tetap manual (player klik Evolve + bayar SIG) sesuai GDD Week 4.
+    // Evolusi tetap manual (player klik Evolve + bayar SIG) sesuai GDD.
     const newLevel  = expToLevel(newExp);
 
-    // 4. Update database
+    // 5. Update database
     const { data: updated, error: updateError } = await supabase
       .from("monsters")
       .update({
@@ -90,7 +102,7 @@ export async function POST(req: NextRequest) {
       throw new Error(updateError?.message ?? "Failed to update entity state.");
     }
 
-    // 4.5. Increment daily quest tap count atomically on database
+    // 6. Increment daily quest tap count atomically on database
     const { error: questError } = await supabase.rpc("increment_daily_tap", {
       p_user_id: monster.owner_id,
       p_count: actualTaps,

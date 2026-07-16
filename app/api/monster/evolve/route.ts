@@ -1,35 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/auth/session";
 import {
   canEvolveToNextStage,
   EVOLUTION_STAT_MULTIPLIER,
   type EvolutionStage,
 } from "@/lib/constants/evolutionThresholds";
 
-// ─── Atomicity Note ───────────────────────────────────────────────────────────
-//
-// Supabase JS client v2 does NOT expose a multi-statement database transaction
-// API (BEGIN / COMMIT / ROLLBACK) from the application layer. True atomicity
-// for the three updates below (SIG balance, monster_stats, monsters.evolution_stage)
-// is therefore enforced via a Postgres RPC function (`evolve_monster`) defined
-// in supabase/migrations/0003_evolve_monster_fn.sql.
-//
-// Inside that PL/pgSQL function the three UPDATE statements execute inside a
-// single implicit transaction: if any statement raises an exception the whole
-// block rolls back automatically, guaranteeing we never end up in a state where
-// SIG is deducted but the stage or stats weren't updated (or vice-versa).
-//
-// The alternative — three sequential .update() calls here in the route — would
-// be vulnerable to partial failures and is deliberately NOT used.
-// ─────────────────────────────────────────────────────────────────────────────
-
 export async function POST(req: NextRequest) {
   try {
-    const { walletAddress, monsterId } = await req.json();
-
-    if (!walletAddress || !monsterId) {
+    // ── Auth: read wallet from SIWE session cookie ───────────────────────────
+    let walletAddress: string;
+    try {
+      walletAddress = await requireAuth();
+    } catch {
       return NextResponse.json(
-        { error: "walletAddress and monsterId are required to begin the evolution ritual." },
+        { error: "Unauthorized. Please authenticate before beginning the evolution ritual." },
+        { status: 401 }
+      );
+    }
+
+    const { monsterId } = await req.json();
+
+    if (!monsterId) {
+      return NextResponse.json(
+        { error: "monsterId is required to begin the evolution ritual." },
         { status: 400 }
       );
     }

@@ -1,24 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/auth/session";
 
+/**
+ * GET /api/monster/list
+ *
+ * Returns all monsters, inventory, and sig_balance for the authenticated user.
+ * Identity is read from the SIWE session cookie — no wallet param needed.
+ */
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const wallet = searchParams.get("wallet");
-
-  if (!wallet) {
+  // ── Auth: read wallet from SIWE session cookie ─────────────────────────────
+  let walletAddress: string;
+  try {
+    walletAddress = await requireAuth();
+  } catch {
     return NextResponse.json(
-      { error: "Missing wallet query param" },
-      { status: 400 }
+      { error: "Unauthorized. Please authenticate first." },
+      { status: 401 }
     );
   }
 
   const supabase = createServiceClient();
 
-  // 1. Find user by wallet address
+  // 1. Find user by wallet address from session
   const { data: user, error: userError } = await supabase
     .from("users")
     .select("id, sig_balance, twitter_handle")
-    .ilike("wallet_address", wallet)
+    .ilike("wallet_address", walletAddress)
     .maybeSingle();
 
   if (userError) {
